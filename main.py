@@ -1,4 +1,5 @@
 import json
+import asyncio
 import chess
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
@@ -6,25 +7,27 @@ from fastapi.responses import StreamingResponse
 app = FastAPI()
 board = chess.Board()
 
-
+# -----------------------------
+# SSE Endpoint (MCP Transport)
+# -----------------------------
 async def event_stream():
-    init_message = {
-        "jsonrpc": "2.0",
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {}
-        }
-    }
-
-    yield "data: " + json.dumps(init_message) + "\n\n"
+    while True:
+        # Send heartbeat to keep connection alive
+        yield ":\n\n"
+        await asyncio.sleep(15)
 
 
 @app.get("/sse")
 async def sse():
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream"
+    )
 
 
+# -----------------------------
+# JSON-RPC Endpoint
+# -----------------------------
 @app.post("/")
 async def rpc_endpoint(request: Request):
     global board
@@ -34,7 +37,15 @@ async def rpc_endpoint(request: Request):
     id_ = body.get("id")
     params = body.get("params", {})
 
-    if method == "tools/list":
+    # ---- Initialize ----
+    if method == "initialize":
+        result = {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {}
+        }
+
+    # ---- List Tools ----
+    elif method == "tools/list":
         result = {
             "tools": [
                 {
@@ -47,7 +58,7 @@ async def rpc_endpoint(request: Request):
                 },
                 {
                     "name": "make_move",
-                    "description": "Make move in SAN format",
+                    "description": "Make move in SAN format (e4, Nf3, etc.)",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -58,7 +69,7 @@ async def rpc_endpoint(request: Request):
                 },
                 {
                     "name": "get_board",
-                    "description": "Get board state",
+                    "description": "Get current board state",
                     "inputSchema": {
                         "type": "object",
                         "properties": {}
@@ -67,23 +78,30 @@ async def rpc_endpoint(request: Request):
             ]
         }
 
+    # ---- Call Tool ----
     elif method == "tools/call":
-        tool = params.get("name")
+        tool_name = params.get("name")
         args = params.get("arguments", {})
 
-        if tool == "start_game":
+        if tool_name == "start_game":
             board = chess.Board()
             result = {"fen": board.fen()}
 
-        elif tool == "make_move":
+        elif tool_name == "make_move":
             try:
                 board.push_san(args["move"])
-                result = {"fen": board.fen(), "board": str(board)}
+                result = {
+                    "fen": board.fen(),
+                    "board": str(board)
+                }
             except Exception as e:
                 result = {"error": str(e)}
 
-        elif tool == "get_board":
-            result = {"fen": board.fen(), "board": str(board)}
+        elif tool_name == "get_board":
+            result = {
+                "fen": board.fen(),
+                "board": str(board)
+            }
 
         else:
             result = {"error": "Unknown tool"}
