@@ -1,35 +1,29 @@
-# main.py
-from fastapi import FastAPI
-from sse_starlette.sse import EventSourceResponse
+from mcp.server.fastapi import FastAPIMCP
 import chess
-import json
-import asyncio
 
-app = FastAPI()
+# Create chess board instance
 board = chess.Board()
 
-@app.get("/sse")
-async def sse():
-    async def event_generator():
-        while True:
-            await asyncio.sleep(1)
-            yield {
-                "event": "ping",
-                "data": "alive"
-            }
+# Create MCP server
+mcp = FastAPIMCP("Chess MCP Server")
 
-    return EventSourceResponse(event_generator())
-
-
-@app.post("/start_game")
-async def start_game():
+@mcp.tool()
+def start_game():
+    """
+    Start a new chess game.
+    """
     global board
     board = chess.Board()
-    return {"status": "game_started", "fen": board.fen()}
+    return {
+        "status": "game_started",
+        "fen": board.fen()
+    }
 
-
-@app.post("/make_move")
-async def make_move(move: str):
+@mcp.tool()
+def make_move(move: str):
+    """
+    Make a chess move using SAN notation (e4, Nf3, etc.)
+    """
     global board
     try:
         board.push_san(move)
@@ -38,13 +32,21 @@ async def make_move(move: str):
             "fen": board.fen(),
             "board": str(board)
         }
-    except:
-        return {"error": "invalid_move"}
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Invalid move: {str(e)}"
+        }
 
-
-@app.get("/get_board")
-async def get_board():
+@mcp.tool()
+def get_board():
+    """
+    Get current board state.
+    """
     return {
         "fen": board.fen(),
         "board": str(board)
     }
+
+# FastAPI app exposed for Railway
+app = mcp.app
